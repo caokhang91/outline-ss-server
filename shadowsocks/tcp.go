@@ -63,11 +63,6 @@ func (s *tcpService) findAccessKey(clientConn onet.DuplexConn) (string, onet.Dup
 		logger.Debugf("TCP: Failed to read ciphertext: %v", err)
 		return "", clientConn, err
 	}
-	if !s.ivCache.Add(salt) {
-		logger.Warningf("TCP: Replay detected")
-		return "", clientConn, errors.New("TCP: Replay detected")
-	}
-
 	// Try each cipher until we find one that authenticates successfully. This assumes that all ciphers are AEAD.
 	// We snapshot the list because it may be modified while we use it.
 	// TODO: Ban and log client IPs with too many failures too quick to protect against DoS.
@@ -88,6 +83,17 @@ func (s *tcpService) findAccessKey(clientConn onet.DuplexConn) (string, onet.Dup
 			continue
 		}
 		logger.Debugf("TCP: Found cipher %v at index %d", id, ci)
+
+		// Check for replay after cipher validation, so that an attacker can't overload the replay cache
+		// by sending random bytes.
+		isNew, err := s.ivCache.Add(salt)
+		if err != nil {
+			logger.Warningf("TCP: Replay check failed: %w", err)
+		} else if !isNew {
+			logger.Warningf("TCP: Replay detected")
+			return "", clientConn, errors.New("TCP: Replay detected")
+		}
+
 		// Move the active cipher to the front, so that the search is quicker next time.
 		s.ciphers.SafeMarkUsedByClientIP(entry, clientIP)
 		src := io.MultiReader(bytes.NewReader(salt[:]), bytes.NewReader(cipherText[:]), clientConn)
@@ -107,7 +113,7 @@ type tcpService struct {
 	ivCache     IVCache
 }
 
-// Prevent replays of this many of the most recent handshakes.
+// Prevent replays of this many recent handshakes.
 const replayHistory = 1e6
 
 // NewTCPService creates a TCPService

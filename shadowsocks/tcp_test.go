@@ -26,6 +26,12 @@ import (
 	logging "github.com/op/go-logging"
 )
 
+type dummyCache struct{}
+
+func (c *dummyCache) Add([32]byte) (bool, error) {
+	return true, nil
+}
+
 // Simulates receiving invalid TCP connection attempts on a server with 100 ciphers.
 func BenchmarkTCPFindCipherFail(b *testing.B) {
 	b.StopTimer()
@@ -40,7 +46,7 @@ func BenchmarkTCPFindCipherFail(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	s := &tcpService{ciphers: cipherList}
+	s := &tcpService{ciphers: cipherList, ivCache: &dummyCache{}}
 	testPayload := MakeTestPayload(50)
 	for n := 0; n < b.N; n++ {
 		go func() {
@@ -129,7 +135,7 @@ func BenchmarkTCPFindCipherRepeat(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	s := &tcpService{ciphers: cipherList}
+	s := &tcpService{ciphers: cipherList, ivCache: &dummyCache{}}
 	cipherEntries := [numCiphers]*CipherEntry{}
 	for cipherNumber, element := range cipherList.SafeSnapshotForClientIP(nil) {
 		cipherEntries[cipherNumber] = element.Value.(*CipherEntry)
